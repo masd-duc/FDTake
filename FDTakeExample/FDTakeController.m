@@ -8,6 +8,7 @@
 
 #import "FDTakeController.h"
 #import <MobileCoreServices/MobileCoreServices.h>
+#import <AVFoundation/AVFoundation.h>
 
 #define kPhotosActionSheetTag 1
 #define kVideosActionSheetTag 2
@@ -20,6 +21,8 @@ static NSString * const kChooseFromLibraryKey = @"chooseFromLibrary";
 static NSString * const kChooseFromPhotoRollKey = @"chooseFromPhotoRoll";
 static NSString * const kCancelKey = @"cancel";
 static NSString * const kNoSourcesKey = @"noSources";
+static NSString * const kAccessDenied = @"accessDenied";
+static NSString * const kEnableAcccessInPrivacySettings = @"enableAcccessInPrivacySettings";
 static NSString * const kStringsTableName = @"FDTake";
 
 @interface FDTakeController() <UIActionSheetDelegate, UIAlertViewDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
@@ -162,54 +165,85 @@ static NSString * const kStringsTableName = @"FDTake";
 
 - (void)actionSheet:(UIActionSheet *)actionSheet didDismissWithButtonIndex:(NSInteger)buttonIndex
 {
-    UIViewController *aViewController = [self _topViewController:[[[UIApplication sharedApplication] keyWindow] rootViewController] ];
     if (buttonIndex == self.actionSheet.cancelButtonIndex) {
         if ([self.delegate respondsToSelector:@selector(takeController:didCancelAfterAttempting:)])
             [self.delegate takeController:self didCancelAfterAttempting:NO];
     } else {
         self.imagePicker.sourceType = [(self.sources)[buttonIndex] integerValue];
         
-        if ((self.imagePicker.sourceType==UIImagePickerControllerSourceTypeCamera) || (self.imagePicker.sourceType==UIImagePickerControllerSourceTypeCamera)) {
-            if (self.defaultToFrontCamera && [UIImagePickerController isCameraDeviceAvailable:UIImagePickerControllerCameraDeviceFront]) {
-                [self.imagePicker setCameraDevice:UIImagePickerControllerCameraDeviceFront];
-            }
-        }
-        // set the media type: photo or video
-        if (actionSheet.tag == kPhotosActionSheetTag) {
-            self.imagePicker.allowsEditing = self.allowsEditingPhoto;
-            self.imagePicker.mediaTypes = @[(NSString *) kUTTypeImage];
-        } else if (actionSheet.tag == kVideosActionSheetTag) {
-            self.imagePicker.allowsEditing = self.allowsEditingVideo;
-            self.imagePicker.mediaTypes = @[(NSString *) kUTTypeMovie];
-        } else if (actionSheet.tag == kVideosOrPhotosActionSheetTag) {
-            if ([self.sources count] == 1) {
-                if (buttonIndex == 0) {
-                    self.imagePicker.mediaTypes = @[(NSString *)kUTTypeImage, (NSString *)kUTTypeMovie];
-                }
+        if (self.imagePicker.sourceType==UIImagePickerControllerSourceTypeCamera) {
+            
+            UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:FDLOCALIZATION(kAccessDenied, @"This app does not have access to your camera.")
+                                                                message:FDLOCALIZATION(kEnableAcccessInPrivacySettings, @"You can enable access in Privacy Settings.")
+                                                               delegate:nil
+                                                      cancelButtonTitle:@"OK"
+                                                      otherButtonTitles:nil];
+            
+            AVAuthorizationStatus authStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+            if (authStatus == AVAuthorizationStatusAuthorized) {
+                [self showImagePickerWithTag:actionSheet.tag buttonIndex:buttonIndex];
+            } else if(authStatus == AVAuthorizationStatusDenied) {
+                [alertView show];
+            } else if(authStatus == AVAuthorizationStatusNotDetermined){
+                [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+                    if (granted){
+                        [self showImagePickerWithTag:actionSheet.tag buttonIndex:buttonIndex];
+                    } else {
+                        [alertView show];
+                    }
+                }];
             } else {
-                if (buttonIndex == 0) {
-                    self.imagePicker.allowsEditing = self.allowsEditingPhoto;
-                    self.imagePicker.mediaTypes = @[(NSString *)kUTTypeImage];
-                } else if (buttonIndex == 1) {
-                    self.imagePicker.allowsEditing = self.allowsEditingVideo;
-                    self.imagePicker.mediaTypes = @[(NSString *)kUTTypeMovie];
-                } else if (buttonIndex == 2) {
-                    self.imagePicker.mediaTypes = @[(NSString *)kUTTypeImage, (NSString *)kUTTypeMovie];
-                }
+                [alertView show];
+            }
+        } else {
+            [self showImagePickerWithTag:actionSheet.tag buttonIndex:buttonIndex];
+        }
+    }
+}
+
+- (void)showImagePickerWithTag:(NSInteger)tag buttonIndex:(NSInteger)buttonIndex {
+    UIViewController *aViewController = [self _topViewController:[[[UIApplication sharedApplication] keyWindow] rootViewController]];
+    
+    if ((self.imagePicker.sourceType==UIImagePickerControllerSourceTypeCamera) || (self.imagePicker.sourceType==UIImagePickerControllerSourceTypeCamera)) {
+        if (self.defaultToFrontCamera && [UIImagePickerController isCameraDeviceAvailable:UIImagePickerControllerCameraDeviceFront]) {
+            [self.imagePicker setCameraDevice:UIImagePickerControllerCameraDeviceFront];
+        }
+    }
+    // set the media type: photo or video
+    if (tag == kPhotosActionSheetTag) {
+        self.imagePicker.allowsEditing = self.allowsEditingPhoto;
+        self.imagePicker.mediaTypes = @[(NSString *) kUTTypeImage];
+    } else if (tag == kVideosActionSheetTag) {
+        self.imagePicker.allowsEditing = self.allowsEditingVideo;
+        self.imagePicker.mediaTypes = @[(NSString *) kUTTypeMovie];
+    } else if (tag == kVideosOrPhotosActionSheetTag) {
+        if ([self.sources count] == 1) {
+            if (buttonIndex == 0) {
+                self.imagePicker.mediaTypes = @[(NSString *)kUTTypeImage, (NSString *)kUTTypeMovie];
+            }
+        } else {
+            if (buttonIndex == 0) {
+                self.imagePicker.allowsEditing = self.allowsEditingPhoto;
+                self.imagePicker.mediaTypes = @[(NSString *)kUTTypeImage];
+            } else if (buttonIndex == 1) {
+                self.imagePicker.allowsEditing = self.allowsEditingVideo;
+                self.imagePicker.mediaTypes = @[(NSString *)kUTTypeMovie];
+            } else if (buttonIndex == 2) {
+                self.imagePicker.mediaTypes = @[(NSString *)kUTTypeImage, (NSString *)kUTTypeMovie];
             }
         }
-        
-        // On iPad use pop-overs.
-        if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
-            [self.popover presentPopoverFromRect:self.popOverPresentRect
-                                          inView:aViewController.view
-                        permittedArrowDirections:UIPopoverArrowDirectionAny
-                                        animated:YES];
-        }
-        else {
-            // On iPhone use full screen presentation.
-            [[self presentingViewController] presentViewController:self.imagePicker animated:YES completion:nil];
-        }
+    }
+    
+    // On iPad use pop-overs.
+    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+        [self.popover presentPopoverFromRect:self.popOverPresentRect
+                                      inView:aViewController.view
+                    permittedArrowDirections:UIPopoverArrowDirectionAny
+                                    animated:YES];
+    }
+    else {
+        // On iPhone use full screen presentation.
+        [[self presentingViewController] presentViewController:self.imagePicker animated:YES completion:nil];
     }
 }
 
